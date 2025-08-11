@@ -39,8 +39,7 @@ class ByteStreamer:
         returns ths properties in a FIleId class.
         """
         logging.debug("Before calling get_file_ids")
-        # Now pass the full message object to get_file_ids
-        file_id = await get_file_ids(self.client, db_id, multi_clients, None)
+        file_id = await get_file_ids(self.client, db_id, multi_clients)
         if not file_id:
             # If get_file_ids returns None, it indicates a critical failure.
             # Return None to be handled by the caller.
