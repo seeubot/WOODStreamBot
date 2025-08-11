@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from pyrogram.enums import ParseMode, ChatType
 from pyrogram.types import Message
-from pyrogram.file_id import FileId
+from pyrogram.file_id import FileId, FileType
 from WOODStream.bot import WOODStream
 from WOODStream.utils.database import Database
 from WOODStream.config import Telegram, Server
@@ -14,7 +14,7 @@ from WOODStream.config import Telegram, Server
 db = Database(Telegram.DATABASE_URL, Telegram.SESSION_NAME)
 
 
-async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message) -> Optional[FileId]:
+async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message: Optional[Message] = None) -> Optional[FileId]:
     logging.debug("Starting of get_file_ids")
     file_info = await db.get_file(db_id)
     if (not "file_ids" in file_info) or not client:
@@ -24,6 +24,15 @@ async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message
         log_msg = await send_file(WOODStream, db_id, file_info['file_id'], message, file_name=file_name)
         if log_msg:
             await db.update_file_ids(db_id, await update_file_id(log_msg.id, multi_clients))
+        else:
+            # Handle the case where sending the file failed
+            logging.error("Failed to send file to log channel. Returning decoded file_id from database.")
+            try:
+                # Decode the original file_id from the database to create a valid FileId object
+                return FileId.decode(file_info['file_id'])
+            except Exception as e:
+                logging.error(f"Failed to decode file ID from database for {db_id}. Error: {e}")
+                return None
         logging.debug("Stored file_id of all clients in DB")
         if not client:
             return
@@ -39,6 +48,14 @@ async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message
             media = get_media_from_message(msg)
             file_id_info[str(client.id)] = getattr(media, "file_id", "")
             await db.update_file_ids(db_id, file_id_info)
+        else:
+            logging.error("Failed to send file to log channel. Returning decoded file_id from database.")
+            try:
+                return FileId.decode(file_info['file_id'])
+            except Exception as e:
+                logging.error(f"Failed to decode file ID from database for {db_id}. Error: {e}")
+                return None
+
         logging.debug("Stored file_id in DB")
 
     logging.debug("Middle of get_file_ids")
@@ -51,18 +68,8 @@ async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message
         logging.debug("Ending of get_file_ids")
         return file_id
     else:
-        logging.error("Failed to retrieve file ID from log channel. The web server might not be able to function correctly.")
-        # Create a dummy FileId object to prevent crashes
-        file_id = FileId(
-            file_type=1, # Document type
-            file_id=file_info['file_id'],
-            file_unique_id=file_info['file_unique_id'],
-        )
-        setattr(file_id, "file_size", file_info['file_size'])
-        setattr(file_id, "mime_type", file_info['mime_type'])
-        setattr(file_id, "file_name", file_info['file_name'])
-        setattr(file_id, "unique_id", file_info['file_unique_id'])
-        return file_id
+        logging.error("Failed to retrieve file ID from log channel, returning None.")
+        return None
 
 
 def get_media_from_message(message: "Message") -> Any:
@@ -147,9 +154,9 @@ async def update_file_id(msg_id, multi_clients):
     return file_ids
 
 
-async def send_file(client: Client, db_id, file_id: str, message, file_name: str | None = None):
+async def send_file(client: Client, db_id, file_id: str, message: Optional[Message], file_name: str | None = None):
     # Use file_name if provided, otherwise fall back to existing logic
-    file_caption = getattr(message, 'caption', None) or (file_name if file_name else get_name(message))
+    file_caption = getattr(message, 'caption', None) if message else (file_name if file_name else "Unnamed File")
     try:
         log_msg = await client.send_cached_media(chat_id=Telegram.FLOG_CHANNEL, file_id=file_id,
                                                  caption=f'**{file_caption}**')
@@ -157,15 +164,14 @@ async def send_file(client: Client, db_id, file_id: str, message, file_name: str
         logging.error(f"Failed to send cached media to log channel. The error occurred for chat_id: {Telegram.FLOG_CHANNEL}. Error: {e}")
         return None
 
-    if log_msg:
-        if isinstance(message, Message):
-            if message.chat.type == ChatType.PRIVATE:
-                await log_msg.reply_text(
-                    text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** [{message.from_user.first_name}](tg://user?id={message.from_user.id})\n**Uꜱᴇʀ ɪᴅ :** `{message.from_user.id}`\n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
-                    disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
-            else:
-                await log_msg.reply_text(
-                    text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** {message.chat.title} \n**Cʜᴀɴɴᴇʟ ɪᴅ :** `{message.chat.id}`\n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
-                    disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
+    if log_msg and message:
+        if message.chat.type == ChatType.PRIVATE:
+            await log_msg.reply_text(
+                text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** [{message.from_user.first_name}](tg://user?id={message.from_user.id})\n**Uꜱᴇʀ ɪᴅ :** `{message.from_user.id}`\n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
+                disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
+        else:
+            await log_msg.reply_text(
+                text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** {message.chat.title} \n**Cʜᴀɴɴᴇʟ ɪᴅ :** `{message.chat.id}`\n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
+                disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
 
     return log_msg
