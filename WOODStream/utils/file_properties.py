@@ -20,7 +20,8 @@ async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message
     if (not "file_ids" in file_info) or not client:
         logging.debug("Storing file_id of all clients in DB")
         log_msg = await send_file(WOODStream, db_id, file_info['file_id'], message)
-        await db.update_file_ids(db_id, await update_file_id(log_msg.id, multi_clients))
+        if log_msg: # <--- Added this check
+            await db.update_file_ids(db_id, await update_file_id(log_msg.id, multi_clients))
         logging.debug("Stored file_id of all clients in DB")
         if not client:
             return
@@ -30,21 +31,27 @@ async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message
     if not str(client.id) in file_id_info:
         logging.debug("Storing file_id in DB")
         log_msg = await send_file(WOODStream, db_id, file_info['file_id'], message)
-        msg = await client.get_messages(Telegram.FLOG_CHANNEL, log_msg.id)
-        media = get_media_from_message(msg)
-        file_id_info[str(client.id)] = getattr(media, "file_id", "")
-        await db.update_file_ids(db_id, file_id_info)
+        if log_msg: # <--- Added this check
+            msg = await client.get_messages(Telegram.FLOG_CHANNEL, log_msg.id)
+            media = get_media_from_message(msg)
+            file_id_info[str(client.id)] = getattr(media, "file_id", "")
+            await db.update_file_ids(db_id, file_id_info)
         logging.debug("Stored file_id in DB")
 
     logging.debug("Middle of get_file_ids")
-    file_id = FileId.decode(file_id_info[str(client.id)])
-    setattr(file_id, "file_size", file_info['file_size'])
-    setattr(file_id, "mime_type", file_info['mime_type'])
-    setattr(file_id, "file_name", file_info['file_name'])
-    setattr(file_id, "unique_id", file_info['file_unique_id'])
-    logging.debug("Ending of get_file_ids")
-    return file_id
-
+    # This block now relies on the file_id_info being populated, which
+    # might not happen if the log_msg fails to send.
+    if str(client.id) in file_id_info:
+        file_id = FileId.decode(file_id_info[str(client.id)])
+        setattr(file_id, "file_size", file_info['file_size'])
+        setattr(file_id, "mime_type", file_info['mime_type'])
+        setattr(file_id, "file_name", file_info['file_name'])
+        setattr(file_id, "unique_id", file_info['file_unique_id'])
+        logging.debug("Ending of get_file_ids")
+        return file_id
+    else:
+        logging.error("Failed to retrieve file ID from log channel, returning None.")
+        return None
 
 def get_media_from_message(message: "Message") -> Any:
     media_types = (
