@@ -19,8 +19,10 @@ async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message
     file_info = await db.get_file(db_id)
     if (not "file_ids" in file_info) or not client:
         logging.debug("Storing file_id of all clients in DB")
-        log_msg = await send_file(WOODStream, db_id, file_info['file_id'], message)
-        if log_msg: # <--- Added this check
+        # Pass file_name from db instead of calling get_name, which caused the error
+        file_name = file_info.get('file_name', 'Unnamed File')
+        log_msg = await send_file(WOODStream, db_id, file_info['file_id'], message, file_name=file_name)
+        if log_msg:
             await db.update_file_ids(db_id, await update_file_id(log_msg.id, multi_clients))
         logging.debug("Stored file_id of all clients in DB")
         if not client:
@@ -30,8 +32,9 @@ async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message
     file_id_info = file_info.setdefault("file_ids", {})
     if not str(client.id) in file_id_info:
         logging.debug("Storing file_id in DB")
-        log_msg = await send_file(WOODStream, db_id, file_info['file_id'], message)
-        if log_msg: # <--- Added this check
+        file_name = file_info.get('file_name', 'Unnamed File')
+        log_msg = await send_file(WOODStream, db_id, file_info['file_id'], message, file_name=file_name)
+        if log_msg:
             msg = await client.get_messages(Telegram.FLOG_CHANNEL, log_msg.id)
             media = get_media_from_message(msg)
             file_id_info[str(client.id)] = getattr(media, "file_id", "")
@@ -39,8 +42,6 @@ async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message
         logging.debug("Stored file_id in DB")
 
     logging.debug("Middle of get_file_ids")
-    # This block now relies on the file_id_info being populated, which
-    # might not happen if the log_msg fails to send.
     if str(client.id) in file_id_info:
         file_id = FileId.decode(file_id_info[str(client.id)])
         setattr(file_id, "file_size", file_info['file_size'])
@@ -52,6 +53,7 @@ async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message
     else:
         logging.error("Failed to retrieve file ID from log channel, returning None.")
         return None
+
 
 def get_media_from_message(message: "Message") -> Any:
     media_types = (
@@ -76,6 +78,9 @@ def get_media_file_size(m):
 
 
 def get_name(media_msg: Message | FileId) -> str:
+    # Ensure file_name is always initialized
+    file_name = ""
+
     if isinstance(media_msg, Message):
         media = get_media_from_message(media_msg)
         file_name = getattr(media, "file_name", "")
@@ -86,7 +91,7 @@ def get_name(media_msg: Message | FileId) -> str:
     if not file_name:
         if isinstance(media_msg, Message) and media_msg.media:
             media_type = media_msg.media.value
-        elif media_msg.file_type:
+        elif isinstance(media_msg, FileId) and media_msg.file_type:
             media_type = media_msg.file_type.name.lower()
         else:
             media_type = "file"
@@ -132,36 +137,25 @@ async def update_file_id(msg_id, multi_clients):
     return file_ids
 
 
-async def send_file(client: Client, db_id, file_id: str, message):
-    file_caption = getattr(message, 'caption', None) or get_name(message)
+async def send_file(client: Client, db_id, file_id: str, message, file_name: str | None = None):
+    # Use file_name if provided, otherwise fall back to existing logic
+    file_caption = getattr(message, 'caption', None) or (file_name if file_name else get_name(message))
     try:
         log_msg = await client.send_cached_media(chat_id=Telegram.FLOG_CHANNEL, file_id=file_id,
                                                  caption=f'**{file_caption}**')
     except ValueError as e:
         logging.error(f"Failed to send cached media to log channel. The error occurred for chat_id: {Telegram.FLOG_CHANNEL}. Error: {e}")
-        # Return None so the calling function knows the message failed to send.
         return None
 
-    if message.chat.type == ChatType.PRIVATE:
-        await log_msg.reply_text(
-            text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** [{message.from_user.first_name}](tg://user?id={message.from_user.id})\n**Uꜱᴇʀ ɪᴅ :** `{message.from_user.id}`\n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
-            disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
-    else:
-        await log_msg.reply_text(
-            text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** {message.chat.title} \n**Cʜᴀɴɴᴇʟ ɪᴅ :** `{message.chat.id}`\n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
-            disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
+    if log_msg:
+        if isinstance(message, Message):
+            if message.chat.type == ChatType.PRIVATE:
+                await log_msg.reply_text(
+                    text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** [{message.from_user.first_name}](tg://user?id={message.from_user.id})\n**Uꜱᴇʀ ɪᴅ :** `{message.from_user.id}`\n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
+                    disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
+            else:
+                await log_msg.reply_text(
+                    text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** {message.chat.title} \n**Cʜᴀɴɴᴇʟ ɪᴅ :** `{message.chat.id}`\n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
+                    disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
 
     return log_msg
-
-    if message.chat.type == ChatType.PRIVATE:
-        await log_msg.reply_text(
-            text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** [{message.from_user.first_name}](tg://user?id={message.from_user.id})\n**Uꜱᴇʀ ɪᴅ :** `{message.from_user.id}`\n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
-            disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
-    else:
-        await log_msg.reply_text(
-            text=f"**RᴇQᴜᴇꜱᴛᴇᴅ ʙʏ :** {message.chat.title} \n**Cʜᴀɴɴᴇʟ ɪᴅ :** `{message.chat.id}`\n**Fɪʟᴇ ɪᴅ :** `{db_id}`",
-            disable_web_page_preview=True, parse_mode=ParseMode.MARKDOWN, quote=True)
-
-    return log_msg
-    # return await client.send_cached_media(Telegram.BIN_CHANNEL, file_id)
-
