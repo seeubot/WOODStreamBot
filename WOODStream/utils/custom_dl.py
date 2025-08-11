@@ -16,7 +16,7 @@ class ByteStreamer:
         self.cached_file_ids: Dict[str, FileId] = {}
         asyncio.create_task(self.clean_cache())
 
-    async def get_file_properties(self, db_id: str, multi_clients) -> FileId:
+    async def get_file_properties(self, db_id: str, multi_clients) -> Optional[FileId]:
         """
         Returns the properties of a media of a specific message in a FIleId class.
         if the properties are cached, then it'll return the cached results.
@@ -24,11 +24,15 @@ class ByteStreamer:
         """
         if not db_id in self.cached_file_ids:
             logging.debug("Before Calling generate_file_properties")
-            await self.generate_file_properties(db_id, multi_clients)
+            file_prop = await self.generate_file_properties(db_id, multi_clients)
+            # Check if the generation failed and return None
+            if not file_prop:
+                return None
             logging.debug(f"Cached file properties for file with ID {db_id}")
+            return self.cached_file_ids[db_id]
         return self.cached_file_ids[db_id]
 
-    async def generate_file_properties(self, db_id: str, multi_clients) -> FileId:
+    async def generate_file_properties(self, db_id: str, multi_clients) -> Optional[FileId]:
         """
         Generates the properties of a media file on a specific message.
         returns ths properties in a FIleId class.
@@ -38,7 +42,7 @@ class ByteStreamer:
         file_id = await get_file_ids(self.client, db_id, multi_clients, None)
         if not file_id:
             # If get_file_ids returns None, it indicates a critical failure.
-            # Handle this gracefully instead of letting the program crash.
+            # Return None to be handled by the caller.
             logging.error(f"Failed to generate file properties for {db_id}. Returning None.")
             return None
         logging.debug(f"Generated file ID and Unique ID for file with ID {db_id}")
