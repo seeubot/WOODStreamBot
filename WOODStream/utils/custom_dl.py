@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, Union
+from typing import Dict, Union, Optional
 from WOODStream.bot import work_loads
 from pyrogram import Client, utils, raw
 from .file_properties import get_file_ids
@@ -27,14 +27,20 @@ class ByteStreamer:
             await self.generate_file_properties(db_id, multi_clients)
             logging.debug(f"Cached file properties for file with ID {db_id}")
         return self.cached_file_ids[db_id]
-    
+
     async def generate_file_properties(self, db_id: str, multi_clients) -> FileId:
         """
         Generates the properties of a media file on a specific message.
         returns ths properties in a FIleId class.
         """
         logging.debug("Before calling get_file_ids")
-        file_id = await get_file_ids(self.client, db_id, multi_clients, Message)
+        # Correctly pass `None` for the message object in a web request context
+        file_id = await get_file_ids(self.client, db_id, multi_clients, None)
+        if not file_id:
+            # If get_file_ids returns None, it indicates a critical failure.
+            # Handle this gracefully instead of letting the program crash.
+            logging.error(f"Failed to generate file properties for {db_id}. Returning None.")
+            return None
         logging.debug(f"Generated file ID and Unique ID for file with ID {db_id}")
         self.cached_file_ids[db_id] = file_id
         logging.debug(f"Cached media file with ID {db_id}")
@@ -203,7 +209,7 @@ class ByteStreamer:
             logging.debug(f"Finished yielding file with {current_part} parts.")
             work_loads[index] -= 1
 
-    
+
     async def clean_cache(self) -> None:
         """
         function to clean the cache to reduce memory usage
