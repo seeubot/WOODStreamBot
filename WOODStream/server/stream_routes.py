@@ -65,10 +65,10 @@ class_cache = {}
 
 async def media_streamer(request: web.Request, db_id: str):
     range_header = request.headers.get("Range", 0)
-    
+
     index = min(work_loads, key=work_loads.get)
     faster_client = multi_clients[index]
-    
+
     if Telegram.MULTI_CLIENT:
         logging.info(f"Client {index} is now serving {request.headers.get('X-FORWARDED-FOR',request.remote)}")
 
@@ -80,9 +80,14 @@ async def media_streamer(request: web.Request, db_id: str):
         tg_connect = utils.ByteStreamer(faster_client)
         class_cache[faster_client] = tg_connect
     logging.debug("before calling get_file_properties")
+
+    # Check if the file properties could be retrieved. If not, raise an error.
     file_id = await tg_connect.get_file_properties(db_id, multi_clients)
+    if not file_id:
+        raise web.HTTPNotFound(text="File not found or an error occurred while retrieving it.")
+
     logging.debug("after calling get_file_properties")
-    
+
     file_size = file_id.file_size
 
     if range_header:
