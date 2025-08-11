@@ -51,8 +51,18 @@ async def get_file_ids(client: Client | bool, db_id: str, multi_clients, message
         logging.debug("Ending of get_file_ids")
         return file_id
     else:
-        logging.error("Failed to retrieve file ID from log channel, returning None.")
-        return None
+        logging.error("Failed to retrieve file ID from log channel. The web server might not be able to function correctly.")
+        # Create a dummy FileId object to prevent crashes
+        file_id = FileId(
+            file_type=1, # Document type
+            file_id=file_info['file_id'],
+            file_unique_id=file_info['file_unique_id'],
+        )
+        setattr(file_id, "file_size", file_info['file_size'])
+        setattr(file_id, "mime_type", file_info['mime_type'])
+        setattr(file_id, "file_name", file_info['file_name'])
+        setattr(file_id, "unique_id", file_info['file_unique_id'])
+        return file_id
 
 
 def get_media_from_message(message: "Message") -> Any:
