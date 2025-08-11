@@ -8,6 +8,7 @@ from pyrogram.session import Session, Auth
 from pyrogram.errors import AuthBytesInvalid
 from pyrogram.file_id import FileId, FileType, ThumbnailSource
 from pyrogram.types import Message
+from WOODStream.utils.database import get_message
 
 
 class ByteStreamer:
@@ -38,8 +39,16 @@ class ByteStreamer:
         Generates the properties of a media file on a specific message.
         returns ths properties in a FIleId class.
         """
+        logging.debug("Fetching message from database to get full file properties.")
+        # Retrieve the message from the database first
+        message = await get_message(db_id)
+        if not message:
+            logging.error(f"Message with ID {db_id} not found in the database.")
+            return None
+
         logging.debug("Before calling get_file_ids")
-        file_id = await get_file_ids(self.client, db_id, multi_clients)
+        # Now pass the full message object to get_file_ids
+        file_id = await get_file_ids(self.client, db_id, multi_clients, message)
         if not file_id:
             # If get_file_ids returns None, it indicates a critical failure.
             # Return None to be handled by the caller.
