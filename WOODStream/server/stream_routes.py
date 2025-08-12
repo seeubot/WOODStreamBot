@@ -1,4 +1,7 @@
-import time
+# Code optimized by fyaz05
+# Code from SpringsFern
+
+import datetime
 import math
 import logging
 import mimetypes
@@ -41,7 +44,8 @@ async def stream_handler(request: web.Request):
     except FIleNotFound as e:
         raise web.HTTPNotFound(text=e.message)
     except (AttributeError, BadStatusLine, ConnectionResetError):
-        pass
+        # The fix is here: return a valid response instead of passing
+        return web.Response(status=500, text="Internal Server Error")
 
 
 @routes.get("/dl/{path}", allow_head=True)
@@ -54,7 +58,8 @@ async def stream_handler(request: web.Request):
     except FIleNotFound as e:
         raise web.HTTPNotFound(text=e.message)
     except (AttributeError, BadStatusLine, ConnectionResetError):
-        pass
+        # The fix is here: return a valid response instead of passing
+        return web.Response(status=500, text="Internal Server Error")
     except Exception as e:
         traceback.print_exc()
         logging.critical(e.with_traceback(None))
